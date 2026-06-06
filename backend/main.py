@@ -1,0 +1,97 @@
+import asyncio
+import os
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from dotenv import load_dotenv
+
+from weave_utils import init_weave
+from memory.redis_client import setup_streams, get_index
+from agents.immune.validator import run_validator_loop
+from agents.immune.curator import receive_proposals, approve_quarantine, reject_quarantine, get_pending_proposals
+from agents.immune.consolidator import run_consolidation_pass
+from agents.workers.orchestrator import answer_query, store_memory
+
+load_dotenv()
+
+# Initialize Weave FIRST, before any @weave.op functions are called
+init_weave()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await get_index()
+    await setup_streams()
+    # Start the immune swarm validator as a background task
+    task = asyncio.create_task(run_validator_loop())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Memory Immune System", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class QueryRequest(BaseModel):
+    query: str
+    session_id: str = "default"
+
+
+class MemoryRequest(BaseModel):
+    content: str
+    source_agent: str = "user"
+    session_id: str = "default"
+
+
+@app.post("/query")
+async def query(req: QueryRequest):
+    answer = await answer_query(req.query, req.session_id)
+    return {"answer": answer}
+
+
+@app.post("/memory")
+async def add_memory(req: MemoryRequest):
+    from agents.workers.orchestrator import embed
+    embedding = await embed(req.content)
+    from memory.schemas import Memory
+    mem = Memory(content=req.content, source_agent=req.source_agent,
+                 session_id=req.session_id, embedding=embedding)
+    from memory.redis_client import write_memory
+    mem_id = await write_memory(mem)
+    return {"id": mem_id}
+
+
+@app.get("/proposals")
+async def list_proposals():
+    await receive_proposals()
+    return [p.model_dump() for p in get_pending_proposals()]
+
+
+@app.post("/proposals/{target_id}/approve")
+async def approve(target_id: str):
+    ok = await approve_quarantine(target_id)
+    return {"approved": ok}
+
+
+@app.post("/proposals/{target_id}/reject")
+async def reject(target_id: str):
+    ok = await reject_quarantine(target_id)
+    return {"rejected": ok}
+
+
+@app.post("/consolidate")
+async def consolidate():
+    count = await run_consolidation_pass()
+    return {"merged": count}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}

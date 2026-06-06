@@ -1,0 +1,16 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+openai-agents==0.7.0
+openai==2.41.0
+weave==0.52.42
+wandb==0.27.2
+redis[hiredis]==7.4.1
+redisvl==0.20.0
+numpy==2.4.6
+pydantic==2.13.4
+python-dotenv==1.2.2
+apscheduler>=3.10.4
+httpx==0.28.1
+anyio==4.13.0
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
