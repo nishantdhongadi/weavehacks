@@ -32,7 +32,18 @@ export interface Proposal {
 export default function Home() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [sessionId] = useState(() => `session-${Date.now()}`);
+  const [sessionId, setSessionId] = useState("default");
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("mis-session-id");
+    if (stored) {
+      setSessionId(stored);
+    } else {
+      const id = `session-${Date.now()}`;
+      sessionStorage.setItem("mis-session-id", id);
+      setSessionId(id);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
