@@ -6,15 +6,20 @@ import {
 import OpenAI from "openai";
 import { NextRequest } from "next/server";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Lazy-init: don't instantiate at module load time (fails at build without key)
+let _runtime: CopilotRuntime | null = null;
 
-const runtime = new CopilotRuntime({
-  remoteEndpoints: [],
-});
+function getRuntime() {
+  if (!_runtime) {
+    _runtime = new CopilotRuntime({ remoteEndpoints: [] });
+  }
+  return _runtime;
+}
 
 export const POST = async (req: NextRequest) => {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const { handleRequest } = copilotRuntimeNextJSAppRouterEndpoint({
-    runtime,
+    runtime: getRuntime(),
     serviceAdapter: new OpenAIAdapter({ openai }),
     endpoint: "/api/copilotkit",
   });
