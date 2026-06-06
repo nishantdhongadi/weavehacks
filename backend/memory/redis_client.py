@@ -97,10 +97,19 @@ async def get_memory(memory_id: str) -> Memory | None:
     raw = await r.hgetall(f"mem:{memory_id}")
     if not raw:
         return None
-    decoded = {k.decode(): v.decode() if isinstance(v, bytes) and k != b"embedding" else v
-               for k, v in raw.items()}
-    decoded.pop("embedding", None)
-    return Memory(id=memory_id, **decoded)
+    decoded = {}
+    embedding = None
+    for k, v in raw.items():
+        key = k.decode() if isinstance(k, bytes) else k
+        if key == "embedding":
+            # Decode raw bytes back to list[float]
+            if v and len(v) > 0:
+                embedding = np.frombuffer(v, dtype=np.float32).tolist()
+        else:
+            decoded[key] = v.decode() if isinstance(v, bytes) else v
+    mem = Memory(id=memory_id, **decoded)
+    mem.embedding = embedding
+    return mem
 
 
 async def search_similar(embedding: list[float], top_k: int = 10, exclude_id: str | None = None) -> list[Memory]:

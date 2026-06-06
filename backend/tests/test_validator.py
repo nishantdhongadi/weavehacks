@@ -28,7 +28,7 @@ def _mock_openai_response(payload: dict):
 @pytest.mark.asyncio
 async def test_detects_contradiction_unit():
     """Validator correctly parses a high-confidence contradiction response."""
-    from agents.immune.validator import check_for_contradiction
+    from swarms.immune.validator import check_for_contradiction
 
     payload = {
         "has_contradiction": True,
@@ -40,7 +40,7 @@ async def test_detects_contradiction_unit():
 
     mock_openai = MagicMock()
     mock_openai.chat.completions.create = AsyncMock(return_value=_mock_openai_response(payload))
-    with patch("agents.immune.validator._get_client", return_value=mock_openai):
+    with patch("swarms.immune.validator._get_client", return_value=mock_openai):
         result = await check_for_contradiction("mem-a", "The API key rotates every 24 hours.", candidates)
 
     assert result is not None
@@ -53,7 +53,7 @@ async def test_detects_contradiction_unit():
 @pytest.mark.asyncio
 async def test_no_contradiction_unit():
     """Validator correctly handles a no-contradiction response."""
-    from agents.immune.validator import check_for_contradiction
+    from swarms.immune.validator import check_for_contradiction
 
     payload = {
         "has_contradiction": False,
@@ -65,7 +65,7 @@ async def test_no_contradiction_unit():
 
     mock_openai = MagicMock()
     mock_openai.chat.completions.create = AsyncMock(return_value=_mock_openai_response(payload))
-    with patch("agents.immune.validator._get_client", return_value=mock_openai):
+    with patch("swarms.immune.validator._get_client", return_value=mock_openai):
         result = await check_for_contradiction("mem-a", "The API key rotates every 24 hours.", candidates)
 
     assert result is None
@@ -74,7 +74,7 @@ async def test_no_contradiction_unit():
 @pytest.mark.asyncio
 async def test_low_confidence_filtered_unit():
     """Contradictions below the 0.7 confidence threshold are filtered."""
-    from agents.immune.validator import check_for_contradiction
+    from swarms.immune.validator import check_for_contradiction
 
     payload = {
         "has_contradiction": True,
@@ -86,7 +86,7 @@ async def test_low_confidence_filtered_unit():
 
     mock_openai = MagicMock()
     mock_openai.chat.completions.create = AsyncMock(return_value=_mock_openai_response(payload))
-    with patch("agents.immune.validator._get_client", return_value=mock_openai):
+    with patch("swarms.immune.validator._get_client", return_value=mock_openai):
         result = await check_for_contradiction("mem-a", "The service may occasionally restart.", candidates)
 
     assert result is None
@@ -95,11 +95,11 @@ async def test_low_confidence_filtered_unit():
 @pytest.mark.asyncio
 async def test_empty_candidates_returns_none_unit():
     """No LLM call is made when there are no candidates."""
-    from agents.immune.validator import check_for_contradiction
+    from swarms.immune.validator import check_for_contradiction
 
     mock_openai = MagicMock()
     mock_openai.chat.completions.create = AsyncMock()
-    with patch("agents.immune.validator._get_client", return_value=mock_openai):
+    with patch("swarms.immune.validator._get_client", return_value=mock_openai):
         result = await check_for_contradiction("mem-a", "The sky is blue.", [])
         mock_openai.chat.completions.create.assert_not_called()
 
@@ -140,7 +140,7 @@ COMPATIBLE_CASES = [
 @pytest.mark.parametrize("new_content,candidates", CLEAR_CONTRADICTION_CASES)
 async def test_detects_contradiction_live(new_content, candidates):
     """Real LLM call — run when OPENAI_API_KEY is available."""
-    from agents.immune.validator import check_for_contradiction
+    from swarms.immune.validator import check_for_contradiction
     result = await check_for_contradiction("mem-a", new_content, candidates)
     assert result is not None, f"Expected contradiction for: '{new_content}'"
     assert result.confidence >= 0.7
@@ -151,6 +151,6 @@ async def test_detects_contradiction_live(new_content, candidates):
 @pytest.mark.parametrize("new_content,candidates", COMPATIBLE_CASES)
 async def test_no_false_positive_live(new_content, candidates):
     """Real LLM call — compatible memories must not fire."""
-    from agents.immune.validator import check_for_contradiction
+    from swarms.immune.validator import check_for_contradiction
     result = await check_for_contradiction("mem-a", new_content, candidates)
     assert result is None, f"False positive for: '{new_content}'"

@@ -8,10 +8,10 @@ from dotenv import load_dotenv
 
 from weave_utils import init_weave
 from memory.redis_client import setup_streams, get_index
-from agents.immune.validator import run_validator_loop
-from agents.immune.curator import receive_proposals, approve_quarantine, reject_quarantine, get_pending_proposals
-from agents.immune.consolidator import run_consolidation_pass
-from agents.workers.orchestrator import answer_query, store_memory
+from swarms.immune.validator import run_validator_loop
+from swarms.immune.curator import receive_proposals, approve_quarantine, reject_quarantine, get_pending_proposals
+from swarms.immune.consolidator import run_consolidation_pass
+from swarms.workers.orchestrator import answer_query, store_memory
 
 load_dotenv()
 
@@ -58,7 +58,7 @@ async def query(req: QueryRequest):
 
 @app.post("/memory")
 async def add_memory(req: MemoryRequest):
-    from agents.workers.orchestrator import embed
+    from swarms.workers.orchestrator import embed
     embedding = await embed(req.content)
     from memory.schemas import Memory
     mem = Memory(content=req.content, source_agent=req.source_agent,
