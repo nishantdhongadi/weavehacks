@@ -19,14 +19,25 @@ load_dotenv()
 init_weave()
 
 
+async def _consolidation_loop(interval_seconds: int = 60):
+    """Periodically merge near-duplicate memories in the background."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await run_consolidation_pass()
+        except Exception as e:
+            print(f"[consolidator] background pass error: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await get_index()
     await setup_streams()
-    # Start the immune swarm validator as a background task
-    task = asyncio.create_task(run_validator_loop())
+    validator_task = asyncio.create_task(run_validator_loop())
+    consolidator_task = asyncio.create_task(_consolidation_loop(60))
     yield
-    task.cancel()
+    validator_task.cancel()
+    consolidator_task.cancel()
 
 
 app = FastAPI(title="Memory Immune System", lifespan=lifespan)
