@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from weave_utils import init_weave
-from memory.redis_client import setup_streams, get_index
+from memory.redis_client import setup_streams, get_index, list_memories
 from swarms.immune.validator import run_validator_loop
 from swarms.immune.curator import receive_proposals, approve_quarantine, reject_quarantine, get_pending_proposals
 from swarms.immune.consolidator import run_consolidation_pass
@@ -66,6 +66,16 @@ async def add_memory(req: MemoryRequest):
     from memory.redis_client import write_memory
     mem_id = await write_memory(mem)
     return {"id": mem_id}
+
+
+@app.get("/memories")
+async def get_memories(status: str | None = None):
+    """
+    List all memories. Optional ?status=active|quarantined filter.
+    Used by the frontend MemoryGraph to poll for live state.
+    """
+    mems = await list_memories(status_filter=status)
+    return [m.model_dump(exclude={"embedding"}) for m in mems]
 
 
 @app.get("/proposals")

@@ -154,3 +154,21 @@ async def search_similar(embedding: list[float], top_k: int = 10, exclude_id: st
 async def quarantine_memory(memory_id: str):
     r = await get_redis()
     await r.hset(f"mem:{memory_id}", "status", "quarantined")
+
+
+async def list_memories(status_filter: str | None = None) -> list[Memory]:
+    """Return all memories, optionally filtered by status (active|quarantined)."""
+    r = await get_redis()
+    keys = await r.keys("mem:*")
+    memories = []
+    for key in keys:
+        mem_id = key.decode().replace("mem:", "") if isinstance(key, bytes) else key.replace("mem:", "")
+        mem = await get_memory(mem_id)
+        if mem is None:
+            continue
+        if status_filter and mem.status != status_filter:
+            continue
+        memories.append(mem)
+    # Sort: active first, then by created_at descending
+    memories.sort(key=lambda m: (m.status != "active", m.created_at), reverse=False)
+    return memories
