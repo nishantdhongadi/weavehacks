@@ -23,7 +23,7 @@ export function MemoryGraph({ memories }: Props) {
   }
 
   return (
-    <div className="p-4 space-y-2">
+    <div className="h-full overflow-y-auto p-4 space-y-2">
       {active.map((m) => (
         <MemoryNode key={m.id} memory={m} />
       ))}

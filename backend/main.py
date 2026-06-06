@@ -102,6 +102,25 @@ async def consolidate():
     return {"merged": count}
 
 
+@app.post("/reset")
+async def reset_demo():
+    """Delete all mem:* keys and reset the immune stream. Lets you re-run the demo cleanly."""
+    from memory.redis_client import get_redis, MEMORY_STREAM, IMMUNE_STREAM, CONSUMER_GROUP
+    r = await get_redis()
+    keys = await r.keys("mem:*")
+    if keys:
+        await r.delete(*keys)
+    for stream in (MEMORY_STREAM, IMMUNE_STREAM):
+        await r.delete(stream)
+    # Re-create consumer groups so the loops don't break
+    for stream in (MEMORY_STREAM, IMMUNE_STREAM):
+        try:
+            await r.xgroup_create(stream, CONSUMER_GROUP, id="0", mkstream=True)
+        except Exception:
+            pass
+    return {"reset": True, "deleted_memories": len(keys)}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}

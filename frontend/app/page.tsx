@@ -161,11 +161,21 @@ export default function Home() {
 
       {/* Right panel: CopilotKit chat */}
       <div className="w-1/2 flex flex-col">
-        <div className="p-4 border-b border-gray-800">
-          <h1 className="text-lg font-bold text-white">Memory Immune System</h1>
-          <p className="text-xs text-gray-400">
-            Session: {sessionId.slice(-8)} · Multi-agent memory governance
-          </p>
+        <div className="p-4 border-b border-gray-800 flex items-center justify-between">
+          <div>
+            <h1 className="text-lg font-bold text-white">Memory Immune System</h1>
+            <p className="text-xs text-gray-400">
+              Session: {sessionId.slice(-8)} · Multi-agent memory governance
+            </p>
+          </div>
+          <a
+            href="https://wandb.ai/nishantorg/memory-immune-system/weave"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors shrink-0"
+          >
+            Weave traces ↗
+          </a>
         </div>
         <div className="flex-1 overflow-hidden">
           <CopilotChat

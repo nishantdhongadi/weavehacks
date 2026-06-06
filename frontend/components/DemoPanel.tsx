@@ -25,6 +25,7 @@ export function DemoPanel({ sessionId, api, onMemoryInjected }: DemoPanelProps) 
   const [seedState, setSeedState] = useState<ButtonState>("idle");
   const [poisonState, setPoisonState] = useState<ButtonState>("idle");
   const [queryState, setQueryState] = useState<ButtonState>("idle");
+  const [resetState, setResetState] = useState<ButtonState>("idle");
   const [queryAnswer, setQueryAnswer] = useState<string | null>(null);
 
   async function injectMemory(content: string, sourceAgent: string) {
@@ -61,6 +62,24 @@ export function DemoPanel({ sessionId, api, onMemoryInjected }: DemoPanelProps) 
     } catch {
       setPoisonState("error");
       setTimeout(() => setPoisonState("idle"), 3000);
+    }
+  }
+
+  async function handleReset() {
+    setResetState("loading");
+    setQueryAnswer(null);
+    try {
+      const res = await fetch(`${api}/reset`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSeedState("idle");
+      setPoisonState("idle");
+      setQueryState("idle");
+      setResetState("done");
+      onMemoryInjected?.();
+      setTimeout(() => setResetState("idle"), 3000);
+    } catch {
+      setResetState("error");
+      setTimeout(() => setResetState("idle"), 3000);
     }
   }
 
@@ -151,6 +170,26 @@ export function DemoPanel({ sessionId, api, onMemoryInjected }: DemoPanelProps) 
         >
           {queryState === "loading" && <Spinner />}
           🔍 Ask: Where is WeaveHacks?
+        </button>
+
+        {/* Reset */}
+        <button
+          onClick={handleReset}
+          disabled={resetState === "loading"}
+          className={[
+            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all",
+            "border focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-gray-900",
+            resetState === "loading"
+              ? "bg-gray-800 border-gray-600 text-gray-400 opacity-70 cursor-wait"
+              : resetState === "done"
+              ? "bg-gray-700 border-gray-500 text-white"
+              : resetState === "error"
+              ? "bg-red-900 border-red-700 text-red-300"
+              : "bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700 focus:ring-gray-500",
+          ].join(" ")}
+        >
+          {resetState === "loading" && <Spinner />}
+          {resetState === "done" ? "✓ Reset" : "↺ Reset Demo"}
         </button>
       </div>
 
