@@ -10,11 +10,11 @@ A multi-agent memory governance system built for WeaveHacks 2026 (theme: multi-a
 
 **Problem solved**: When a team of agents shares memory, that memory rots. Contradictory facts, duplicates, and stale entries accumulate and silently degrade every agent that reads them. Nobody runs a janitor for shared agent memory. This is the "memory poisoning / memory rot" problem in multi-agent systems.
 
-**The visceral demo**: poison the shared memory on stage → the worker swarm gives a wrong answer → the immune system *deterministically* detects the contradiction → human approves the quarantine → memory heals → the same query now works.
+**The visceral demo**: poison the shared memory on stage → the worker swarm gives a wrong answer → the immune system *reliably* detects the contradiction (temperature-0 reasoning + a 0.7 confidence floor) → human approves the quarantine → memory heals → the same query now works.
 
 ### Core design decision (read this before changing the detection logic)
 
-The immune system's trigger is **deterministic contradiction-detection**, NOT fuzzy "outcome degradation from traces." A **Validator agent** reads memories and finds two that *logically conflict* (e.g. "the API key rotates daily" vs. "the API key is static"). This fires reliably every time and genuinely requires a reasoning agent — there is no ground-truth-signal problem and nothing ML-fuzzy to break on stage.
+The immune system's trigger is **reasoning-based contradiction-detection** (temperature 0 + a 0.7 confidence floor for high reliability), NOT fuzzy "outcome degradation from traces." A **Validator agent** reads memories and finds two that *logically conflict* (e.g. "the API key rotates daily" vs. "the API key is static"). This fires reliably and genuinely requires a reasoning agent — there is no ground-truth-signal problem and nothing ML-fuzzy to break on stage.
 
 **Weave's role is the audit + trust-history layer**, not a live predictor: every memory's provenance, usage count, which agent vouched for it, and the full immune-response trace tree. This is the "Best Use of Weave" play AND it can't fail live because it reads recorded data, it doesn't predict.
 
@@ -185,20 +185,18 @@ Weave auto-instruments OpenAI SDK calls once initialized — captures inputs, ou
 
 **Weavify helper skill** (quick setup): `npx add-skill altryne/weavify-skill`
 
-### Redis — the substrate (all four uses are load-bearing)
+### Redis — the substrate (three load-bearing data structures)
 
 - **Streams** = the agent message bus + memory event log. Worker writes publish to a Stream; the immune swarm is a Stream consumer group. This is the multi-agent coordination mechanism.
 - **RedisVL** = long-term vector memory (`text-embedding-3-small`, DIM 1536, COSINE). Used by both retrieval and the Validator's "find related memories" step.
-- **Hash** = each memory document (content, provenance, source agent, timestamp, status: active|quarantined).
-- **Sorted Set** = per-memory trust score, updated on validation/consolidation.
+- **Hash** = each memory document (content, provenance, source agent, timestamp, status: active|quarantined, numeric `trust_score`). Pending quarantine proposals are persisted in a Redis Hash too, so a backend reload never drops an in-flight approval. Trust drives the quarantine target: a contradicting write loses unless it is strictly more trusted than the established memory.
 
 Vectors stored as raw bytes: `np.array(embedding, dtype=np.float32).tobytes()`. Normalize before COSINE search.
 
 ### CopilotKit / AG-UI (all three primitives are essential)
 
 - **Shared state** keeps the live memory graph in sync with backend memory state.
-- **Generative UI** — the immune swarm renders its own `ApprovalCard` when proposing a quarantine.
-- **Human-in-the-loop** — the user approves/rejects before the Curator quarantines anything.
+- **Generative UI + Human-in-the-loop** — the immune swarm renders its own `ApprovalCard` **inline in the chat** via `useCopilotAction({ renderAndWaitForResponse })`, which blocks the agent until the user approves/rejects before the Curator quarantines anything.
 
 Connects via the `/api/copilotkit` Next.js route using `CopilotRuntime`; `useCoAgent` streams agent state to the frontend.
 
