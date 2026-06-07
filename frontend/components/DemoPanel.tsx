@@ -28,11 +28,16 @@ export function DemoPanel({ sessionId, api, onMemoryInjected }: DemoPanelProps) 
   const [resetState, setResetState] = useState<ButtonState>("idle");
   const [queryAnswer, setQueryAnswer] = useState<string | null>(null);
 
-  async function injectMemory(content: string, sourceAgent: string) {
+  async function injectMemory(content: string, sourceAgent: string, trustScore = 1.0) {
     const res = await fetch(`${api}/memory`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, source_agent: sourceAgent, session_id: sessionId }),
+      body: JSON.stringify({
+        content,
+        source_agent: sourceAgent,
+        session_id: sessionId,
+        trust_score: trustScore,
+      }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }
@@ -40,8 +45,9 @@ export function DemoPanel({ sessionId, api, onMemoryInjected }: DemoPanelProps) 
   async function handleSeedTruth() {
     setSeedState("loading");
     try {
+      // Established truths get full trust (1.0).
       await Promise.all(
-        TRUE_MEMORIES.map((m) => injectMemory(m, "demo-seed"))
+        TRUE_MEMORIES.map((m) => injectMemory(m, "demo-seed", 1.0))
       );
       setSeedState("done");
       onMemoryInjected?.();
@@ -55,7 +61,8 @@ export function DemoPanel({ sessionId, api, onMemoryInjected }: DemoPanelProps) 
   async function handleInjectPoison() {
     setPoisonState("loading");
     try {
-      await injectMemory(POISON_MEMORY, "demo-poison");
+      // Poison arrives as a low-trust write (0.3) from an untrusted source.
+      await injectMemory(POISON_MEMORY, "attacker", 0.3);
       setPoisonState("done");
       onMemoryInjected?.();
       setTimeout(() => setPoisonState("idle"), 3000);

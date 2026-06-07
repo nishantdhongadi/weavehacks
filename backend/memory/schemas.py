@@ -31,3 +31,6 @@ class QuarantineProposal(BaseModel):
     keep_id: str             # the memory to keep
     reasoning: str
     status: Literal["pending", "approved", "rejected"] = "pending"
+    # Weave call id of the contradiction-detection op, so the human
+    # approve/reject decision can be attached back as Weave feedback.
+    weave_call_id: str | None = None

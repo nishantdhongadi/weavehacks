@@ -30,6 +30,12 @@ def _get_client() -> AsyncOpenAI:
     return _client
 
 
+# Cosine DISTANCE ceiling (0=identical, 2=opposite) for a memory to count as a
+# candidate. Contradictions are about the same subject, so they sit very close;
+# this filters out unrelated noise on a sparse store without dropping real conflicts.
+MAX_CANDIDATE_DISTANCE = 0.6
+
+
 CONTRADICTION_PROMPT = """You are a memory auditor for a multi-agent system.
 
 You will be given a NEW memory and a list of EXISTING memories. Your job is to
@@ -46,12 +52,13 @@ Only flag clear, direct logical contradictions.
 New memory:
 {new_memory}
 
-Existing memories:
+Existing memories (each prefixed with its [ID: ...]):
 {existing_memories}
 
-Respond in JSON only:
+Respond in JSON only. Use the EXACT id string from the [ID: ...] prefix:
 {{
   "has_contradiction": true | false,
+  "conflicting_memory_id": "<the id of the conflicting existing memory, or null>",
   "conflicting_memory_content": "<exact text of the conflicting memory, or null>",
   "explanation": "<one sentence explaining the contradiction, or null>",
   "confidence": <0.0 to 1.0>
@@ -91,19 +98,25 @@ async def check_for_contradiction(
     if not raw.get("has_contradiction") or raw.get("confidence", 0) < 0.7:
         return None
 
-    # Find which candidate matched
-    conflicting_content = raw.get("conflicting_memory_content", "")
-    conflicting_id = None
-    for c in candidates:
-        if c["content"].strip() == conflicting_content.strip():
-            conflicting_id = c["id"]
-            break
-    # Fuzzy fallback — first partial match
-    if not conflicting_id:
+    candidates_by_id = {c["id"]: c for c in candidates}
+
+    # Primary: match by the id the LLM returned (robust to paraphrase).
+    conflicting_id = raw.get("conflicting_memory_id")
+    if conflicting_id not in candidates_by_id:
+        conflicting_id = None
+
+    # Fallback: match by content (exact, then prefix) for older prompt behaviour.
+    conflicting_content = (raw.get("conflicting_memory_content") or "").strip()
+    if not conflicting_id and conflicting_content:
         for c in candidates:
-            if conflicting_content[:40] in c["content"]:
+            if c["content"].strip() == conflicting_content:
                 conflicting_id = c["id"]
                 break
+        if not conflicting_id:
+            for c in candidates:
+                if conflicting_content[:40] and conflicting_content[:40] in c["content"]:
+                    conflicting_id = c["id"]
+                    break
 
     if not conflicting_id:
         return None
@@ -112,7 +125,7 @@ async def check_for_contradiction(
         memory_a_id=new_memory_id,
         memory_b_id=conflicting_id,
         memory_a_content=new_memory_content,
-        memory_b_content=conflicting_content,
+        memory_b_content=candidates_by_id[conflicting_id]["content"],
         explanation=raw.get("explanation", ""),
         confidence=raw.get("confidence", 0.0),
     )
@@ -131,14 +144,18 @@ async def process_memory_event(memory_id: str) -> QuarantineProposal | None:
     if not mem or not mem.embedding:
         return None
 
-    candidates = await search_similar(mem.embedding, top_k=10, exclude_id=memory_id)
+    # Only consider genuinely-related memories. Without a distance floor a sparse
+    # store hands the validator unrelated text and invites false-positive cards.
+    candidates = await search_similar(
+        mem.embedding, top_k=10, exclude_id=memory_id, max_distance=MAX_CANDIDATE_DISTANCE,
+    )
     active_candidates = [
         {"id": c.id, "content": c.content, "trust_score": c.trust_score}
         for c in candidates
         if c.status == "active"
     ]
 
-    conflict = await check_for_contradiction(
+    conflict, call = await check_for_contradiction.call(
         new_memory_id=memory_id,
         new_memory_content=mem.content,
         candidates=active_candidates,
@@ -148,23 +165,29 @@ async def process_memory_event(memory_id: str) -> QuarantineProposal | None:
         return None
 
     mem_b = await get_memory(conflict.memory_b_id)
-    mem_b_trust = mem_b.trust_score if mem_b else 0.5
+    mem_b_trust = mem_b.trust_score if mem_b else 1.0
 
-    if mem.trust_score >= mem_b_trust:
-        target_id = conflict.memory_b_id
+    # Tie-break favors the ESTABLISHED memory: a NEW write that contradicts an
+    # existing one is the suspect unless it is strictly more trusted. This makes
+    # the canonical poison-an-established-fact demo quarantine the poison, not the truth.
+    if mem.trust_score > mem_b_trust:
+        target_id = conflict.memory_b_id          # new write wins; quarantine the old one
         keep_id = memory_id
+        target_trust, keep_trust = mem_b_trust, mem.trust_score
     else:
-        target_id = memory_id
+        target_id = memory_id                     # new write is the suspect
         keep_id = conflict.memory_b_id
+        target_trust, keep_trust = mem.trust_score, mem_b_trust
 
     proposal = QuarantineProposal(
         conflict=conflict,
         target_id=target_id,
         keep_id=keep_id,
         reasoning=(
-            f"Memory '{target_id[:8]}...' has lower trust ({min(mem.trust_score, mem_b_trust):.2f}) "
-            f"and contradicts '{keep_id[:8]}...': {conflict.explanation}"
+            f"Memory '{target_id[:8]}...' (trust {target_trust:.2f}) contradicts higher/equal-trust "
+            f"memory '{keep_id[:8]}...' (trust {keep_trust:.2f}): {conflict.explanation}"
         ),
+        weave_call_id=getattr(call, "id", None),
     )
 
     await publish_quarantine_proposal({

@@ -59,6 +59,7 @@ class MemoryRequest(BaseModel):
     content: str
     source_agent: str = "user"
     session_id: str = "default"
+    trust_score: float = 1.0
 
 
 @app.post("/query")
@@ -73,7 +74,8 @@ async def add_memory(req: MemoryRequest):
     embedding = await embed(req.content)
     from memory.schemas import Memory
     mem = Memory(content=req.content, source_agent=req.source_agent,
-                 session_id=req.session_id, embedding=embedding)
+                 session_id=req.session_id, trust_score=req.trust_score,
+                 embedding=embedding)
     from memory.redis_client import write_memory
     mem_id = await write_memory(mem)
     return {"id": mem_id}
@@ -92,7 +94,7 @@ async def get_memories(status: str | None = None):
 @app.get("/proposals")
 async def list_proposals():
     await receive_proposals()
-    return [p.model_dump() for p in get_pending_proposals()]
+    return [p.model_dump() for p in await get_pending_proposals()]
 
 
 @app.post("/proposals/{target_id}/approve")
@@ -117,10 +119,12 @@ async def consolidate():
 async def reset_demo():
     """Delete all mem:* keys and reset the immune stream. Lets you re-run the demo cleanly."""
     from memory.redis_client import get_redis, MEMORY_STREAM, IMMUNE_STREAM, CONSUMER_GROUP
+    from swarms.immune.curator import PENDING_KEY
     r = await get_redis()
     keys = await r.keys("mem:*")
     if keys:
         await r.delete(*keys)
+    await r.delete(PENDING_KEY)
     for stream in (MEMORY_STREAM, IMMUNE_STREAM):
         await r.delete(stream)
     # Re-create consumer groups so the loops don't break

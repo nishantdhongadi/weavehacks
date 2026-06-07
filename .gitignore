@@ -9,3 +9,5 @@ frontend/out/
 *.egg-info/
 dist/
 .pytest_cache/
+.claude/
+chat_export/

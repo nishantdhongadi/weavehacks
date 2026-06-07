@@ -22,6 +22,8 @@ export interface Proposal {
   keep_id: string;
   reasoning: string;
   conflict: {
+    memory_a_id: string;
+    memory_b_id: string;
     memory_a_content: string;
     memory_b_content: string;
     explanation: string;
@@ -116,6 +118,59 @@ export default function Home() {
     },
   });
 
+  // TRUE CopilotKit human-in-the-loop generative UI: the immune swarm renders
+  // its own ApprovalCard INLINE in the chat and BLOCKS until the human decides.
+  useCopilotAction({
+    name: "reviewQuarantineProposal",
+    description:
+      "When the immune swarm has a pending quarantine proposal, call this to render the approval card inline in the chat and wait for the human to approve or reject. Always use this to resolve pending proposals.",
+    parameters: [
+      {
+        name: "target_id",
+        type: "string",
+        required: false,
+        description: "target_id of the proposal to review; omit to review the first pending one",
+      },
+    ],
+    renderAndWaitForResponse: ({ args, status, respond }) => {
+      const proposal =
+        proposals.find((p) => p.target_id === args?.target_id) ?? proposals[0];
+      if (!proposal) {
+        return (
+          <div className="text-xs text-gray-500 my-2">
+            No pending quarantine proposals.
+          </div>
+        );
+      }
+      if (status === "complete") {
+        return (
+          <div className="text-xs text-emerald-400 my-2">
+            ✓ Quarantine decision recorded — memory healed.
+          </div>
+        );
+      }
+      return (
+        <div className="my-2">
+          <ApprovalCard
+            proposal={proposal}
+            onApprove={async () => {
+              await fetch(`${API}/proposals/${proposal.target_id}/approve`, { method: "POST" });
+              await refresh();
+              respond?.(
+                "User APPROVED the quarantine. The lower-trust contradicting memory has been quarantined and shared memory is healed.",
+              );
+            }}
+            onReject={async () => {
+              await fetch(`${API}/proposals/${proposal.target_id}/reject`, { method: "POST" });
+              await refresh();
+              respond?.("User REJECTED the quarantine. Both memories remain active.");
+            }}
+          />
+        </div>
+      );
+    },
+  });
+
   useCopilotAction({
     name: "injectMemory",
     description: "Inject a new fact into the shared memory store (also used to simulate memory poisoning during the demo)",
@@ -196,8 +251,8 @@ export default function Home() {
 RULES:
 1. For ANY factual question the user asks, ALWAYS call queryWithMemory first. Never answer from your own training data.
 2. Present the answer returned by queryWithMemory verbatim — this reflects the current shared memory state.
-3. If proposals are pending, proactively mention them and offer to approve via approveQuarantine.
-4. You can inject facts with injectMemory and reject proposals with rejectQuarantine.
+3. If there are pending quarantine proposals, call reviewQuarantineProposal to render the approval card inline and let the human decide. Do this proactively when proposals exist.
+4. You can inject facts with injectMemory.
 
 Current state: ${activeCount} active memories, ${quarantinedCount} quarantined, ${proposals.length} pending proposals.`}
             labels={{ title: "Agent Chat", initial: "Ask me anything — I answer from shared Redis memory." }}

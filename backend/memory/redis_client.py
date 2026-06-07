@@ -112,7 +112,18 @@ async def get_memory(memory_id: str) -> Memory | None:
     return mem
 
 
-async def search_similar(embedding: list[float], top_k: int = 10, exclude_id: str | None = None) -> list[Memory]:
+async def search_similar(
+    embedding: list[float],
+    top_k: int = 10,
+    exclude_id: str | None = None,
+    max_distance: float | None = None,
+) -> list[Memory]:
+    """KNN cosine search. Returns Memory objects WITH their embeddings populated.
+
+    max_distance: optional cosine-distance ceiling (0=identical .. 2=opposite).
+    Candidates farther than this are dropped — keeps a sparse store from feeding
+    unrelated text into the validator.
+    """
     r = await get_redis()
     vec = np.array(embedding, dtype=np.float32).tobytes()
     query = (
@@ -121,7 +132,7 @@ async def search_similar(embedding: list[float], top_k: int = 10, exclude_id: st
     results = await r.execute_command(
         "FT.SEARCH", "memory_idx", query,
         "PARAMS", "2", "vec", vec,
-        "RETURN", "6", "content", "source_agent", "session_id", "status", "trust_score", "score",
+        "RETURN", "7", "content", "source_agent", "session_id", "status", "trust_score", "score", "embedding",
         "SORTBY", "score",
         "DIALECT", "2",
     )
@@ -136,18 +147,33 @@ async def search_similar(embedding: list[float], top_k: int = 10, exclude_id: st
             continue
         fields = items[i + 1]
         field_dict = {}
+        embedding_bytes = None
         for j in range(0, len(fields), 2):
             k = fields[j].decode() if isinstance(fields[j], bytes) else fields[j]
-            v = fields[j + 1].decode() if isinstance(fields[j + 1], bytes) else fields[j + 1]
-            field_dict[k] = v
-        memories.append(Memory(
+            raw_v = fields[j + 1]
+            if k == "embedding":
+                embedding_bytes = raw_v  # keep raw bytes; do NOT decode
+                continue
+            field_dict[k] = raw_v.decode() if isinstance(raw_v, bytes) else raw_v
+
+        if max_distance is not None:
+            try:
+                if float(field_dict.get("score", 0.0)) > max_distance:
+                    continue
+            except (TypeError, ValueError):
+                pass
+
+        mem = Memory(
             id=mem_id,
             content=field_dict.get("content", ""),
             source_agent=field_dict.get("source_agent", ""),
             session_id=field_dict.get("session_id", "unknown"),
             status=field_dict.get("status", "active"),
             trust_score=float(field_dict.get("trust_score", 1.0)),
-        ))
+        )
+        if embedding_bytes:
+            mem.embedding = np.frombuffer(embedding_bytes, dtype=np.float32).tolist()
+        memories.append(mem)
     return memories
 
 
