@@ -104,7 +104,7 @@ Two coordinated swarms. The worker swarm does the user's task; the immune swarm 
 ## Directory Structure
 
 ```
-weavehacks/
+engram/
 ├── frontend/                       # Next.js + CopilotKit
 │   ├── app/
 │   │   ├── page.tsx                # Chat UI + live memory graph

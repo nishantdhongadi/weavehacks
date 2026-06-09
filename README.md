@@ -146,7 +146,7 @@ async def approve_quarantine(target_id):
 ## Project Structure
 
 ```
-weavehacks/
+engram/
 ├── backend/
 │   ├── main.py                     # FastAPI app; weave.init() first
 │   ├── weave_utils.py              # weave.init() + feedback helpers
