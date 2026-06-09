@@ -1,26 +1,83 @@
 @import "tailwindcss";
 
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg:              #171717;
+  --bg-surface:      #1f1f1f;
+  --bg-elevated:     #262626;
+  --border:          #303030;
+  --border-subtle:   #242424;
+  --text:            #e8e8e6;
+  --text-secondary:  #909090;
+  --text-muted:      #525252;
+  --accent:          #d97706;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ── CopilotKit — tune on top of its built-in dark mode ──────────────────────
+   colorScheme: "dark" on <html> activates CopilotKit's own dark variables.
+   We only override to match our exact palette.                                */
+.copilotKitChat {
+  --copilot-kit-background-color:               var(--bg)          !important;
+  --copilot-kit-input-background-color:         var(--bg-elevated) !important;
+  --copilot-kit-secondary-color:                var(--bg-surface)  !important;
+  --copilot-kit-separator-color:                var(--border)      !important;
+  --copilot-kit-primary-color:                  var(--accent)      !important;
+  --copilot-kit-secondary-contrast-color:       var(--text)        !important;
+  --copilot-kit-muted-color:                    var(--text-muted)  !important;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* User bubble: match our surface style */
+.copilotKitChat .copilotKitUserMessage {
+  background: var(--bg-elevated) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
 }
+
+/* Input area — outer container darker than the textarea so they're visually distinct */
+.copilotKitChat .copilotKitInputContainer {
+  background: var(--bg) !important;
+  border-top: 1px solid var(--border) !important;
+  padding: 12px !important;
+}
+
+/* The textarea box itself — elevated so it stands out from the container */
+.copilotKitChat .copilotKitInput {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+}
+
+/* Textarea text */
+.copilotKitChat .copilotKitInput > textarea {
+  background: transparent !important;
+  color: var(--text) !important;
+}
+.copilotKitChat .copilotKitInput > textarea::placeholder {
+  color: var(--text-muted) !important;
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────────── */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in-up { animation: fade-in-up 0.25s ease-out forwards; }
+
+@keyframes conflict-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.3); }
+  50%       { box-shadow: 0 0 0 5px rgba(217, 119, 6, 0); }
+}
+.conflict-pulse { animation: conflict-pulse 2s ease-in-out infinite; }
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }

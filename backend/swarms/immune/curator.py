@@ -12,6 +12,7 @@ Two things make this more than a stub:
 import weave
 from memory.redis_client import quarantine_memory, get_redis, IMMUNE_STREAM, CONSUMER_GROUP
 from memory.schemas import QuarantineProposal
+from events import emit
 
 PENDING_KEY = "proposals:pending"  # Redis Hash: target_id -> proposal JSON
 
@@ -38,7 +39,6 @@ async def _attach_weave_feedback(call_id: str | None, decision: str, proposal: Q
         print(f"[curator] weave feedback skipped: {e}")
 
 
-@weave.op()
 async def receive_proposals() -> list[QuarantineProposal]:
     """Drain pending proposals off the immune stream into the Redis pending hash."""
     r = await get_redis()
@@ -81,7 +81,33 @@ async def approve_quarantine(target_id: str) -> bool:
     await quarantine_memory(target_id)
     if proposal:
         await _attach_weave_feedback(proposal.weave_call_id, "approved", proposal)
+    emit("immune", "Curator", "approve", f"✅ Human approved — memory {target_id[:8]}… quarantined")
     print(f"[curator] ✅ Quarantined memory {target_id[:8]}...")
+    return True
+
+
+@weave.op()
+async def approve_quarantine_swap(target_id: str) -> bool:
+    """Human chose the other memory — quarantine keep_id instead of target_id."""
+    proposal = await _pop_proposal(target_id)
+    if not proposal:
+        return False
+    swap_target = proposal.keep_id
+    await quarantine_memory(swap_target)
+    await _attach_weave_feedback(
+        proposal.weave_call_id,
+        "approved_swapped",
+        # Report with swapped roles so Weave feedback reflects what actually happened
+        QuarantineProposal(
+            conflict=proposal.conflict,
+            target_id=swap_target,
+            keep_id=target_id,
+            reasoning=proposal.reasoning,
+            weave_call_id=proposal.weave_call_id,
+        ),
+    )
+    emit("immune", "Curator", "approve", f"✅ Human swapped decision — memory {swap_target[:8]}… quarantined")
+    print(f"[curator] ✅ Quarantined (swapped) memory {swap_target[:8]}...")
     return True
 
 
@@ -91,6 +117,7 @@ async def reject_quarantine(target_id: str) -> bool:
     proposal = await _pop_proposal(target_id)
     if proposal:
         await _attach_weave_feedback(proposal.weave_call_id, "rejected", proposal)
+    emit("immune", "Curator", "reject", f"❌ Human rejected proposal for {target_id[:8]}…")
     print(f"[curator] ❌ Proposal rejected for {target_id[:8]}...")
     return True
 

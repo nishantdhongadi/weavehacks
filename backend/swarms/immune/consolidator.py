@@ -6,6 +6,7 @@ import weave
 from memory.redis_client import get_redis, search_similar, write_memory, get_memory
 from memory.schemas import Memory
 from openai import AsyncOpenAI
+from events import emit
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,7 +22,6 @@ def _get_client() -> AsyncOpenAI:
 COSINE_SIM_THRESHOLD = 0.97
 
 
-@weave.op()
 async def cosine_similarity(a: list[float], b: list[float]) -> float:
     va, vb = np.array(a), np.array(b)
     return float(np.dot(va, vb) / (np.linalg.norm(va) * np.linalg.norm(vb)))
@@ -68,6 +68,9 @@ async def run_consolidation_pass():
     keys = await r.keys("mem:*")
     merged_count = 0
 
+    if keys:
+        emit("immune", "Consolidator", "scan", f"Scanning {len(keys)} memories for near-duplicates (cosine ≥ {COSINE_SIM_THRESHOLD})…")
+
     for key in keys:
         mem_id = key.decode().replace("mem:", "") if isinstance(key, bytes) else key.replace("mem:", "")
         mem = await get_memory(mem_id)
@@ -80,6 +83,7 @@ async def run_consolidation_pass():
                 continue
             sim = await cosine_similarity(mem.embedding, candidate.embedding)
             if sim >= COSINE_SIM_THRESHOLD:
+                emit("immune", "Consolidator", "merge", f"Merging near-duplicate pair (sim={sim:.3f}) → canonical memory")
                 merged = await merge_memories(mem, candidate)
                 await write_memory(merged)
                 # Quarantine both originals
@@ -88,5 +92,7 @@ async def run_consolidation_pass():
                 merged_count += 1
                 break  # one merge per memory per pass
 
+    if merged_count:
+        emit("immune", "Consolidator", "complete", f"Merged {merged_count} near-duplicate {'pair' if merged_count == 1 else 'pairs'}")
     print(f"[consolidator] Merged {merged_count} near-duplicate pairs.")
     return merged_count

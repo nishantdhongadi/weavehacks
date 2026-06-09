@@ -15,6 +15,7 @@ from openai import AsyncOpenAI
 from memory.redis_client import get_memory, search_similar
 from memory.bus import consume_memory_events, publish_quarantine_proposal
 from memory.schemas import ConflictReport, QuarantineProposal
+from events import emit
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,21 +34,27 @@ def _get_client() -> AsyncOpenAI:
 # Cosine DISTANCE ceiling (0=identical, 2=opposite) for a memory to count as a
 # candidate. Contradictions are about the same subject, so they sit very close;
 # this filters out unrelated noise on a sparse store without dropping real conflicts.
-MAX_CANDIDATE_DISTANCE = 0.6
+MAX_CANDIDATE_DISTANCE = 1.2
 
 
 CONTRADICTION_PROMPT = """You are a memory auditor for a multi-agent system.
 
 You will be given a NEW memory and a list of EXISTING memories. Your job is to
-determine if any existing memory directly CONTRADICTS the new one — meaning they
-make mutually exclusive factual claims that cannot both be true.
+determine if any existing memory directly CONTRADICTS the new one.
+
+CONTRADICTION means the two memories assign DIFFERENT values to the SAME attribute
+of the SAME subject, such that accepting both would be inconsistent. Examples:
+- "X is in City A" vs "X is in City B" → CONTRADICTION (same subject, different location)
+- "Use tool A" vs "Use tool B" → CONTRADICTION (same context, different tool)
+- "The value is 5" vs "The value is 10" → CONTRADICTION (same attribute, different value)
+- "X happens on Monday" vs "X happens on Friday" → CONTRADICTION
 
 Do NOT flag:
-- Memories that are merely different topics
-- Memories that are complementary or additive
-- Memories that are vague and could be reconciled
+- Memories about completely different subjects
+- Memories that add detail without conflicting (e.g. "X is in SF" + "X is at 123 Main St, SF")
 
-Only flag clear, direct logical contradictions.
+When two memories assign conflicting values to the same property of the same entity,
+that IS a contradiction even if they don't explicitly negate each other.
 
 New memory:
 {new_memory}
@@ -78,6 +85,8 @@ async def check_for_contradiction(
     if not candidates:
         return None
 
+    emit("immune", "Validator", "llm", f"Running contradiction check against {len(candidates)} candidates (temp=0)…")
+
     existing_text = "\n".join(
         f"[ID: {c['id']}] {c['content']}" for c in candidates
     )
@@ -96,6 +105,7 @@ async def check_for_contradiction(
     raw = json.loads(resp.choices[0].message.content)
 
     if not raw.get("has_contradiction") or raw.get("confidence", 0) < 0.7:
+        emit("immune", "Validator", "clear", "No contradiction found — memory is clean")
         return None
 
     candidates_by_id = {c["id"]: c for c in candidates}
@@ -144,6 +154,9 @@ async def process_memory_event(memory_id: str) -> QuarantineProposal | None:
     if not mem or not mem.embedding:
         return None
 
+    short_id = memory_id[:8]
+    emit("immune", "Validator", "scan", f"New memory {short_id}… — scanning for conflicts")
+
     # Only consider genuinely-related memories. Without a distance floor a sparse
     # store hands the validator unrelated text and invites false-positive cards.
     candidates = await search_similar(
@@ -155,6 +168,8 @@ async def process_memory_event(memory_id: str) -> QuarantineProposal | None:
         if c.status == "active"
     ]
 
+    emit("immune", "Validator", "knn", f"Found {len(active_candidates)} semantically similar {'memory' if len(active_candidates) == 1 else 'memories'} within distance {MAX_CANDIDATE_DISTANCE}")
+
     conflict, call = await check_for_contradiction.call(
         new_memory_id=memory_id,
         new_memory_content=mem.content,
@@ -163,6 +178,8 @@ async def process_memory_event(memory_id: str) -> QuarantineProposal | None:
 
     if not conflict:
         return None
+
+    emit("immune", "Validator", "conflict", f"⚠️ Conflict detected ({int(conflict.confidence * 100)}% confidence) — routing to Curator")
 
     mem_b = await get_memory(conflict.memory_b_id)
     mem_b_trust = mem_b.trust_score if mem_b else 1.0
@@ -195,6 +212,8 @@ async def process_memory_event(memory_id: str) -> QuarantineProposal | None:
         "status": "pending",
     })
 
+    emit("immune", "Curator", "proposal", "Quarantine proposal queued — awaiting human approval")
+
     return proposal
 
 
@@ -205,6 +224,9 @@ async def run_validator_loop():
         memory_id = fields.get("memory_id")
         if not memory_id:
             continue
-        proposal = await process_memory_event(memory_id)
-        if proposal:
-            print(f"[validator] ⚠️  Conflict detected: {proposal.conflict.explanation}")
+        try:
+            proposal = await process_memory_event(memory_id)
+            if proposal:
+                print(f"[validator] ⚠️  Conflict detected: {proposal.conflict.explanation}")
+        except Exception as e:
+            print(f"[validator] ERROR processing {memory_id}: {e}") # keep loop alive

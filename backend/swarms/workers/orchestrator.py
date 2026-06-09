@@ -20,6 +20,7 @@ from openai import AsyncOpenAI
 from agents import Agent, Runner, function_tool, set_tracing_disabled
 from memory.redis_client import write_memory, search_similar
 from memory.schemas import Memory
+from events import emit
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -75,7 +76,9 @@ async def search_shared_memory(query: str) -> str:
     Returns the ACTIVE (non-quarantined) memories most semantically similar to
     the query. Quarantined memories are never returned.
     """
+    emit("worker", "Retriever", "tool_call", "Searching vector store (top-5 KNN)…")
     facts = await retrieve_context(query)
+    emit("worker", "Retriever", "tool_result", f"Found {len(facts)} relevant {'memory' if len(facts) == 1 else 'memories'}")
     if not facts:
         return "No relevant memories found in shared memory."
     return "\n".join(f"- {f}" for f in facts)
@@ -141,13 +144,30 @@ async def _fallback_answer(query: str) -> str:
 async def answer_query(query: str, session_id: str) -> str:
     """Main worker entry point: run the agent swarm, then store the Q&A as memory."""
     orchestrator = _build_swarm()
+    emit("worker", "Orchestrator", "start", f"Query received — routing to Retriever")
     try:
+        emit("worker", "Orchestrator", "handoff", "Handing off to Retriever →")
         result = await Runner.run(orchestrator, query, max_turns=8)
+        emit("worker", "Retriever", "handoff", "Handing off to Answerer →")
         answer = result.final_output
+        emit("worker", "Answerer", "complete", "Answer produced")
     except Exception as e:  # never let a handoff hiccup break the live demo
         print(f"[worker-swarm] handoff run failed ({e}); using fallback")
+        emit("worker", "Orchestrator", "fallback", "Handoff failed — using direct RAG")
         answer = await _fallback_answer(query)
 
-    # Store the Q&A as a new memory, authored by the Answerer worker.
-    await store_memory(f"Q: {query} | A: {answer}", source_agent="answerer", session_id=session_id)
+    # Store the Q&A at low trust (0.3) so it never beats a user-seeded fact
+    # in a trust tie-break and gets correctly quarantined if it conflicts.
+    emit("worker", "Answerer", "store", "Writing Q&A to shared memory →")
+    embedding = await embed(f"Q: {query} | A: {answer}")
+    mem = Memory(
+        content=f"Q: {query} | A: {answer}",
+        source_agent="answerer",
+        session_id=session_id,
+        trust_score=0.3,
+        embedding=embedding,
+    )
+    from memory.redis_client import write_memory
+    await write_memory(mem)
+    emit("worker", "Answerer", "stored", "Memory written — immune swarm notified")
     return answer

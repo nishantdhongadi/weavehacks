@@ -3,13 +3,14 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from weave_utils import init_weave
 from memory.redis_client import setup_streams, get_index, list_memories
 from swarms.immune.validator import run_validator_loop
-from swarms.immune.curator import receive_proposals, approve_quarantine, reject_quarantine, get_pending_proposals
+from swarms.immune.curator import receive_proposals, approve_quarantine, approve_quarantine_swap, reject_quarantine, get_pending_proposals
 from swarms.immune.consolidator import run_consolidation_pass
 from swarms.workers.orchestrator import answer_query, store_memory
 
@@ -34,7 +35,7 @@ async def lifespan(app: FastAPI):
     await get_index()
     await setup_streams()
     validator_task = asyncio.create_task(run_validator_loop())
-    consolidator_task = asyncio.create_task(_consolidation_loop(60))
+    consolidator_task = asyncio.create_task(_consolidation_loop(600))  # every 10 min — don't fire during 3-min demo
     yield
     validator_task.cancel()
     consolidator_task.cancel()
@@ -103,6 +104,13 @@ async def approve(target_id: str):
     return {"approved": ok}
 
 
+@app.post("/proposals/{target_id}/approve-swap")
+async def approve_swap(target_id: str):
+    """Quarantine the keep_id instead — human chose the other memory."""
+    ok = await approve_quarantine_swap(target_id)
+    return {"approved_swapped": ok}
+
+
 @app.post("/proposals/{target_id}/reject")
 async def reject(target_id: str):
     ok = await reject_quarantine(target_id)
@@ -134,6 +142,20 @@ async def reset_demo():
         except Exception:
             pass
     return {"reset": True, "deleted_memories": len(keys)}
+
+
+@app.get("/events")
+async def sse_events():
+    """Server-Sent Events stream of agent activity across both swarms."""
+    from events import event_stream
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/health")

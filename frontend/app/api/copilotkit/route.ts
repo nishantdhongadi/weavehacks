@@ -20,7 +20,7 @@ export const POST = async (req: NextRequest) => {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const { handleRequest } = copilotRuntimeNextJSAppRouterEndpoint({
     runtime: getRuntime(),
-    serviceAdapter: new OpenAIAdapter({ openai }),
+    serviceAdapter: new OpenAIAdapter({ openai, model: "gpt-4o-mini" }),
     endpoint: "/api/copilotkit",
   });
   return handleRequest(req);
